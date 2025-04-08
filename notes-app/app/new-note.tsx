@@ -1,19 +1,45 @@
-import { Text, View, StyleSheet, TextInput, TouchableOpacity, Modal } from "react-native";
+import { Text, View, StyleSheet, TextInput, TouchableOpacity, Modal, ScrollView } from "react-native";
 import { FontAwesome } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useState, useEffect } from "react";
 import { useNotes } from '../context/NoteContext';
+import { Note } from '../types/note';
 
 export default function NewNoteScreen() {
   const router = useRouter();
-  const { addNote } = useNotes();
+  const { addNote, updateNote, notes } = useNotes();
+  const params = useLocalSearchParams();
+  
+  const [isReadMode, setIsReadMode] = useState(false);
   const [isTagDialogVisible, setIsTagDialogVisible] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]); // Start with no tags
+  const [title, setTitle] = useState(""); // State for note title
+  const [content, setContent] = useState(""); // State for note content
+  const [currentNote, setCurrentNote] = useState<Note | null>(null);
+
+  // Initialize note data from params if available
+  useEffect(() => {
+    if (params.id) {
+      const noteId = params.id as string;
+      const foundNote = notes.find(note => note.id === noteId);
+      
+      if (foundNote) {
+        setCurrentNote(foundNote);
+        setTitle(foundNote.title);
+        setContent(foundNote.content);
+        setTags(foundNote.tags);
+        // Only set read mode if explicitly specified
+        if (params.mode === 'read') {
+          setIsReadMode(true);
+        }
+      }
+    }
+  }, [params.id, notes]); // Only re-run when id or notes change
 
   const handleAddTag = () => {
     if (tagInput.trim() !== "") {
-      const newTag = `#${tagInput}`;
+      const newTag = tagInput.trim().startsWith('#') ? tagInput.trim() : `#${tagInput.trim()}`;
       // Only add if it's not already in the list
       if (!tags.includes(newTag)) {
         setTags([...tags, newTag]);
@@ -34,13 +60,28 @@ export default function NewNoteScreen() {
     setTags(tags.filter(tag => tag !== tagToRemove));
   };
 
+  const toggleEditMode = () => {
+    setIsReadMode(!isReadMode);
+  };
+
   const handleSaveNote = async () => {
     const noteData = {
-      title: "New Note", // Placeholder title, you can replace it with a TextInput value
-      content: "Note content goes here...", // Placeholder content, you can replace it with a TextInput value
+      title: title,
+      content: content,
       tags: tags,
     };
-    await addNote(noteData);
+    
+    if (currentNote) {
+      // Update existing note
+      await updateNote({
+        ...currentNote,
+        ...noteData,
+      });
+    } else {
+      // Add new note
+      await addNote(noteData);
+    }
+    
     router.push('/'); // Navigate back to home after saving
   };
 
@@ -51,35 +92,73 @@ export default function NewNoteScreen() {
           <FontAwesome name="arrow-left" size={24} color="#007AFF" />
         </TouchableOpacity>
         <View style={styles.headerIcons}>
-          <FontAwesome name="eye" size={24} color="#007AFF" />
+          {currentNote && (
+            <TouchableOpacity onPress={toggleEditMode}>
+              <FontAwesome 
+                name={isReadMode ? "edit" : "eye"} 
+                size={24} 
+                color="#007AFF" 
+              />
+            </TouchableOpacity>
+          )}
           <FontAwesome name="trash" size={24} color="#007AFF" />
           <FontAwesome name="search" size={24} color="#007AFF" />
         </View>
       </View>
       
-      <TextInput
-        style={styles.titleInput}
-        placeholder="Title"
-      />
-      <TextInput
-        style={styles.contentInput}
-        placeholder="Write your note here..."
-        multiline
-      />
-      
-      <TouchableOpacity style={styles.saveButton} onPress={handleSaveNote}>
-        <Text style={styles.saveButtonText}>Save Note</Text>
-      </TouchableOpacity>
+      {isReadMode ? (
+        <View style={styles.readModeContainer}>
+          <Text style={styles.titleDisplay}>{title}</Text>
+          <ScrollView style={styles.contentScrollView}>
+            <Text style={styles.contentDisplay}>{content}</Text>
+          </ScrollView>
+        </View>
+      ) : (
+        <>
+          <TextInput
+            style={styles.titleInput}
+            placeholder="Title"
+            value={title}
+            onChangeText={setTitle}
+          />
+          <TextInput
+            style={styles.contentInput}
+            placeholder="Write your note here..."
+            multiline
+            value={content}
+            onChangeText={setContent}
+          />
+          
+          <TouchableOpacity style={styles.saveButton} onPress={handleSaveNote}>
+            <Text style={styles.saveButtonText}>Save Note</Text>
+          </TouchableOpacity>
+        </>
+      )}
 
       <View style={styles.footer}>
-        <View style={styles.tagList}>
-          {tags.map((tag, index) => (
-            <Text key={index} style={styles.tag}>{tag}</Text>
-          ))}
-        </View>
-        <TouchableOpacity onPress={() => setIsTagDialogVisible(true)}>
-          <FontAwesome name="hashtag" size={24} color="#007AFF" />
-        </TouchableOpacity>
+        {isReadMode ? (
+          <ScrollView 
+            horizontal={true}
+            showsHorizontalScrollIndicator={false}
+            style={styles.tagScrollView}
+            contentContainerStyle={styles.tagScrollViewContent}
+          >
+            {tags.map((tag, index) => (
+              <Text key={index} style={styles.tag}>{tag}</Text>
+            ))}
+          </ScrollView>
+        ) : (
+          <>
+            <View style={styles.tagList}>
+              {tags.map((tag, index) => (
+                <Text key={index} style={styles.tag}>{tag}</Text>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => setIsTagDialogVisible(true)}>
+              <FontAwesome name="hashtag" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          </>
+        )}
 
         {/* Tag Dialog Modal */}
         <Modal
@@ -143,6 +222,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F8F8F8",
     padding: 16,
+  },
+  readModeContainer: {
+    flex: 1,
+    marginBottom: 16,
+  },
+  contentScrollView: {
+    flex: 1,
+  },
+  tagScrollView: {
+    flexDirection: "row",
+    maxHeight: 40,
+    width: "100%",
+  },
+  tagScrollViewContent: {
+    alignItems: "center",
+    paddingRight: 10,
   },
   modalOverlay: {
     flex: 1,
@@ -260,6 +355,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 16,
   },
+  titleDisplay: {
+    fontSize: 24,
+    fontWeight: "bold",
+    marginBottom: 16,
+    color: "#333333",
+  },
+  contentDisplay: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: "#333333",
+    marginBottom: 16,
+  },
   footer: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -268,12 +375,15 @@ const styles = StyleSheet.create({
   },
   tagList: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    flex: 1,
   },
   tag: {
     backgroundColor: "#E0E0E0",
     borderRadius: 15,
     padding: 5,
     marginRight: 5,
+    marginBottom: 5,
   },
   saveButton: {
     backgroundColor: '#007AFF',
